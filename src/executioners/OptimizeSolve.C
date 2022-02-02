@@ -4,8 +4,6 @@
 #include "libmesh/petsc_vector.h"
 #include "libmesh/petsc_matrix.h"
 
-#include <petsc/private/taoimpl.h>
-
 InputParameters
 OptimizeSolve::validParams()
 {
@@ -130,7 +128,7 @@ OptimizeSolve::taoSolve()
   ierr = MatCreateShell(_my_comm.get(), _ndof, _ndof, _ndof, _ndof, this, &_hessian);
   CHKERRQ(ierr);
   // Define Hessian-vector multiplication routine
-  ierr = MatShellSetOperation(_hessian, MATOP_MULT, (void(*)(void))applyHessianWrapper);
+  ierr = MatShellSetOperation(_hessian, MATOP_MULT, (void (*)(void))applyHessianWrapper);
   CHKERRQ(ierr);
   // Link matrix-free Hessian to Tao
   ierr = TaoSetHessianRoutine(_tao, _hessian, _hessian, hessianFunctionWrapper, this);
@@ -212,8 +210,8 @@ OptimizeSolve::setTaoSolutionStatus(double f, int its, double gnorm, double cnor
   _hess_iterate = 0;
   // print verbose per iteration output
   if (_verbose)
-    _console << "TAO SOLVER: iteration=" << its << "\tf=" << f
-             << "\tgnorm=" << gnorm << "\tcnorm=" << cnorm << "\txdiff=" << xdiff << std::endl;
+    _console << "TAO SOLVER: iteration=" << its << "\tf=" << f << "\tgnorm=" << gnorm
+             << "\tcnorm=" << cnorm << "\txdiff=" << xdiff << std::endl;
 }
 
 PetscErrorCode
@@ -261,47 +259,42 @@ OptimizeSolve::objectiveAndGradientFunctionWrapper(
 }
 
 PetscErrorCode
-OptimizeSolve::hessianFunctionWrapper(Tao /*tao*/, Vec x, Mat /*hessian*/, Mat /*pc*/, void * ctx)
+OptimizeSolve::hessianFunctionWrapper(
+    Tao /*tao*/, Vec /*x*/, Mat /*hessian*/, Mat /*pc*/, void * /*ctx*/)
 {
-  auto * solver = static_cast<OptimizeSolve *>(ctx);
-  libMesh::PetscVector<Number> param(x, solver->_my_comm);
-  *solver->_parameters = param;
-  auto n = solver->_ndof;
-  auto comm = solver->_my_comm.get();
-  MatCreateShell(comm, n,n,n,n, ctx, &(solver->_hessian)); // need to fix two of the n's for parallel
-  MatShellSetOperation(solver->_hessian, MATOP_MULT, (void(*)(void)) OptimizeSolve::applyHessianWrapper);
+  // everything is done by the shell matrix multiply -- applyHessianWrapper
   return 0;
 }
 
 PetscErrorCode
 OptimizeSolve::applyHessianWrapper(Mat H, Vec s, Vec Hs)
 {
-  void *ctx;
-  MatShellGetContext(H,&ctx);
+  void * ctx;
+  MatShellGetContext(H, &ctx);
   auto * solver = static_cast<OptimizeSolve *>(ctx);
   libMesh::PetscVector<Number> sbar(s, solver->_my_comm);
   libMesh::PetscVector<Number> Hsbar(Hs, solver->_my_comm);
-  return solver->applyHessian(sbar,Hsbar);
+  return solver->applyHessian(sbar, Hsbar);
 }
 
 PetscErrorCode
-OptimizeSolve::applyHessian(libMesh::PetscVector<Number> &s, libMesh::PetscVector<Number> &Hs)
+OptimizeSolve::applyHessian(libMesh::PetscVector<Number> & s, libMesh::PetscVector<Number> & Hs)
 {
-  _form_function->updateParameters(s); 
-      // What happens for material inversion when the Hessian 
-      // is dependent on the parameters? Deal with it later???
+  // What happens for material inversion when the Hessian
+  // is dependent on the parameters? Deal with it later???
+
+  _form_function->updateParameters(s);
   if (!_problem.execMultiApps(EXEC_FORWARD))
     mooseError("Forward solve multiapp failed!");
-// delete this?
-//  if (_solve_on.contains(EXEC_FORWARD)) 
-//    _inner_solve->solve();
+  _obj_iterate++;
+
   _form_function->setMisfitToSimulatedValues();
   if (!_problem.execMultiApps(EXEC_ADJOINT))
     mooseError("Adjoint solve multiapp failed!");
-// delete this?
-//  if (_solve_on.contains(EXEC_ADJOINT))
-//    _inner_solve->solve();
+  _grad_iterate++;
+
   _form_function->computeGradient(Hs);
+  _hess_iterate++;
   return 0;
 }
 
@@ -319,12 +312,9 @@ OptimizeSolve::objectiveFunction()
 {
   _form_function->updateParameters(*_parameters.get());
 
-//  _problem.execute(EXEC_FORWARD);
   bool multiapp_passed = true;
   if (!_problem.execMultiApps(EXEC_FORWARD))
     multiapp_passed = false;
-//  if (_solve_on.contains(EXEC_FORWARD))
-//    _inner_solve->solve();
 
   _obj_iterate++;
   return _form_function->computeAndCheckObjective(multiapp_passed);
@@ -335,11 +325,8 @@ OptimizeSolve::gradientFunction(libMesh::PetscVector<Number> & gradient)
 {
   _form_function->updateParameters(*_parameters.get());
 
-//  _problem.execute(EXEC_ADJOINT);
   if (!_problem.execMultiApps(EXEC_ADJOINT))
     mooseError("Adjoint solve multiapp failed!");
-//  if (_solve_on.contains(EXEC_ADJOINT))
-//    _inner_solve->solve();
 
   _grad_iterate++;
   _form_function->computeGradient(gradient);
