@@ -13,8 +13,8 @@ OptimizeSolve::validParams()
   params.addRequiredParam<MooseEnum>(
       "tao_solver", tao_solver_enum, "Tao solver to use for optimization.");
   ExecFlagEnum exec_enum = ExecFlagEnum();
-  exec_enum.addAvailableFlags(EXEC_NONE, EXEC_FORWARD, EXEC_ADJOINT, EXEC_HESSIAN);
-  exec_enum = {EXEC_FORWARD, EXEC_ADJOINT, EXEC_HESSIAN};
+  exec_enum.addAvailableFlags(EXEC_NONE, EXEC_FORWARD, EXEC_ADJOINT, EXEC_HOMOGENOUS_FORWARD);
+  exec_enum = {EXEC_FORWARD, EXEC_ADJOINT, EXEC_HOMOGENOUS_FORWARD};
   params.addParam<ExecFlagEnum>(
       "solve_on", exec_enum, "List of flags indicating when inner system solve should occur.");
   return params;
@@ -259,14 +259,15 @@ OptimizeSolve::objectiveAndGradientFunctionWrapper(
 }
 
 PetscErrorCode
-OptimizeSolve::hessianFunctionWrapper(Tao /*tao*/, Vec x, Mat /*hessian*/, Mat /*pc*/, void * ctx)
+OptimizeSolve::hessianFunctionWrapper(
+    Tao /*tao*/, Vec /*x*/, Mat /*hessian*/, Mat /*pc*/, void * /*ctx*/)
 {
   // this will need to set the real parameters (Vec x) on the solver (see ln 250) so that the
   // current parameter can be used in the applyHessianWrapper.  This is not important for force
   // inversion because the hessian does not change.  This will be important for material
   // inversion.
 
-  // everything is done by the shell matrix multiply -- applyHessianWrapper
+  // everything is d  one by the shell matrix multiply -- applyHessianWrapper
   return 0;
 }
 
@@ -284,13 +285,16 @@ OptimizeSolve::applyHessianWrapper(Mat H, Vec s, Vec Hs)
 PetscErrorCode
 OptimizeSolve::applyHessian(libMesh::PetscVector<Number> & s, libMesh::PetscVector<Number> & Hs)
 {
+
+  if (!_problem.hasMultiApps(EXEC_HOMOGENOUS_FORWARD))
+    mooseError("Hessian based optimization algorithms require a sub-app with:\n"
+               "   execute_on = HOMOGENOUS_FORWARD");
+
   // What happens for material inversion when the Hessian
   // is dependent on the parameters? Deal with it later???
   // see notes on how this needs to change for Material inversion
   _form_function->updateParameters(s);
-  // this might be exec_forward_hessian so 2 new multiapps for material inversion
-
-  if (!_problem.execMultiApps(EXEC_FORWARD))
+  if (!_problem.execMultiApps(EXEC_HOMOGENOUS_FORWARD))
     mooseError("Forward solve multiapp failed!");
   _obj_iterate++;
 
@@ -316,6 +320,10 @@ OptimizeSolve::variableBoundsWrapper(Tao tao, Vec /*xl*/, Vec /*xu*/, void * ctx
 Real
 OptimizeSolve::objectiveFunction()
 {
+  if (!_problem.hasMultiApps(EXEC_FORWARD))
+    mooseError("All optimization algorithms require a sub-app with:\n"
+               "   execute_on = FORWARD");
+
   _form_function->updateParameters(*_parameters.get());
 
   bool multiapp_passed = true;
@@ -329,6 +337,10 @@ OptimizeSolve::objectiveFunction()
 void
 OptimizeSolve::gradientFunction(libMesh::PetscVector<Number> & gradient)
 {
+  if (!_problem.hasMultiApps(EXEC_ADJOINT))
+    mooseError("Gradient based optimization algorithms require a sub-app with:\n"
+               "   execute_on = ADJOINT");
+
   _form_function->updateParameters(*_parameters.get());
 
   if (!_problem.execMultiApps(EXEC_ADJOINT))
