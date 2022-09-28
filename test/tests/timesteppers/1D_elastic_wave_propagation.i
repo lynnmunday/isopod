@@ -1,144 +1,132 @@
-w=10 #frequency
+#w=10
 [Mesh]
    type = GeneratedMesh
-   dim = 1
+   dim = 3
    xmin=0
    xmax=1
-   nx = 1000
+   nx=30
+   ymin=0
+   ymax=0.1
+   ny = 3
+   zmin=0
+   zmax=0.1
+   nz = 3
 []
 
-[Variables]
-    [uxr]
-       order = FIRST
-       family = LAGRANGE
+[GlobalParams]
+  displacements = 'disp_x disp_y disp_z'
+[]
+
+[Problem]
+ type = ReferenceResidualProblem
+ reference_vector = 'ref'
+ extra_tag_vectors = 'ref'
+ group_variables = 'disp_x disp_y disp_z'
+[]
+
+[Modules]
+  [TensorMechanics]
+    [Master]
+      [all]
+        strain = SMALL
+        add_variables = true
+        new_system = true
+        formulation = TOTAL
+        volumetric_locking_correction = true
+        generate_output = 'cauchy_stress_xx cauchy_stress_yy cauchy_stress_zz '
+                          'cauchy_stress_xy cauchy_stress_xz cauchy_stress_yz '
+                          'strain_xx strain_yy strain_zz strain_xy strain_xz strain_yz'
+      []
     []
-    [uxi]
-       order = FIRST
-       family = LAGRANGE
-    []
+  []
 []
 
 [Kernels]
-  #stressdivergence terms
-    [urealx]
-        type = StressDivergenceTensors
-        variable = uxr
-        displacements='uxr'
-        component = 0
-        base_name = real
-    []
-    [uimagx]
-        type = StressDivergenceTensors
-        variable = uxi
-        displacements='uxi'
-        component = 0
-        base_name = imag
-    []
     #reaction terms
     [reaction_realx]
-        type = MatReaction
-        variable = uxr
-        mob_name = omega_sq
+        type = Reaction
+        variable = disp_x
+        rate = 1#${fparse -w*w}
+        extra_vector_tags = 'ref'
     []
-    [reaction_imagx]
-        type = MatReaction
-        variable = uxi
-        mob_name = omega_sq
+    [reaction_realy]
+        type = Reaction
+        variable = disp_y
+        rate = 1#${fparse -w*w}
+        extra_vector_tags = 'ref'
+    []
+    [reaction_realz]
+        type = Reaction
+        variable = disp_z
+        rate = 1#${fparse -w*w}
+        extra_vector_tags = 'ref'
     []
 []
 
 [BCs]
 #Left
-#[uxr_left]
-#      type = CoupledVarNeumannBC
-#      variable = uxr
-#      boundary = 'left'
-#      v = uxi
-#      coef=${fparse -w}
-#[]
-#[uxi_left]
-#      type = CoupledVarNeumannBC
-#      variable = uxi
-#      boundary = 'left'
-#      v = uxr
-#      coef=${fparse w}
-#[]
-  #Right
-  [BC_right_xreal]
-        type = DirichletBC
-        variable = uxr
-        boundary = 'right'
-        value = 0.5
-  []
-  [BC_right_ximag]
-        type = DirichletBC
-        variable = uxi
-        boundary = 'right'
-        value = 0
-  []
+[disp_x_left]
+  type = DirichletBC
+  variable = disp_x
+  boundary = 'left'
+  value = 0.0
+[]
+[disp_y_left]
+  type = DirichletBC
+  variable = disp_y
+  boundary = 'left'
+  value = 0.0
+[]
+[disp_z_left]
+  type = DirichletBC
+  variable = disp_z
+  boundary = 'left'
+  value = 0.0
+[]
+#Right
+[BC_right_yreal]
+    type = NeumannBC
+    variable = disp_y
+    boundary = 'right'
+    value = 100
+[]
 []
 
 [Materials]
-  [omega_sq]
-    type = ParsedMaterial
-    f_name = omega_sq
-    function = 't*t'
-    outputs = exodus
-  []
-
-  [elasticity_tensor_real]
+  [elastic_tensor_Al]
     type = ComputeIsotropicElasticityTensor
-    base_name = real
-    youngs_modulus = 1
-    poissons_ratio = 0.0
+    youngs_modulus = 68e9
+    poissons_ratio = 0.36
   []
-  [strain_real]
-    type = ComputeSmallStrain
-    base_name = real
-    displacements='uxr'
+  [compute_stress]
+    type = ComputeLagrangianLinearElasticStress
   []
-  [stress_real]
-    type = ComputeLinearElasticStress
-    base_name = real
-  []
-
-   [elasticity_tensor_imag]
-    type = ComputeIsotropicElasticityTensor
-    base_name = imag
-    youngs_modulus = 1
-    poissons_ratio = 0.0
-  []
-  [strain_imag]
-    type = ComputeSmallStrain
-    base_name = imag
-    displacements='uxi'
-  []
-  [stress_imag]
-    type = ComputeLinearElasticStress
-    base_name = imag
-  []
-
 []
-[VectorPostprocessors]
+
+[Postprocessors]
   [midpt_real]
-    type = PointValueSampler
-    variable = uxr
-    points = '0.5 0.0 0'
-    sort_by = id
+    type = PointValue
+    point = '0.5 0.05 0.05'
+    variable = disp_y
   []
-  [midpt_imag]
-    type = PointValueSampler
-    variable = uxi
-    points = '0.5 0.0 0'
-    sort_by = id
-    []
 []
-[Outputs]
-    csv=true
-    exodus=false
-    [exodus]
-      type=Exodus
-    []
+
+[Functions]
+  [./freq2]
+    type = ParsedFunction
+    vars = density
+    vals = 2.7e3 #Al kg/m3
+    value = '-t*t*density'
+  [../]
+[]
+
+[Controls]
+  [./func_control]
+    type = RealFunctionControl
+    parameter = 'Kernels/*/rate'
+    function = 'freq2'
+    execute_on = 'initial timestep_begin'
+  [../]
 []
 
 [Executioner]
@@ -146,11 +134,16 @@ w=10 #frequency
   solve_type=NEWTON
   petsc_options_iname = ' -pc_type'
   petsc_options_value = 'lu'
-  start_time = 5
-  end_time =  100
+  start_time = 490  #starting frequency
+  end_time =  520  #ending frequency
+  nl_abs_tol = 1e-6
   [TimeStepper]
-    type = ConstantDT
+    type = FrequencySweepStepper
     freqStepSize = 5
-    dt=0
   []
+[]
+
+[Outputs]
+    # csv=true
+    exodus=true
 []
